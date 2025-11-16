@@ -1,0 +1,529 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Day14 — Falling Catch Game</title>
+  <meta name="description" content="Day14 落ち物キャッチゲーム。Canvas・ゲームループ・重力風の落下・衝突判定・キーボード操作・LocalStorage保存を学べるブラウザゲーム。" />
+  <style>
+    :root{
+      --bg:#050816;
+      --panel:#0b1020;
+      --card:#10162e;
+      --text:#e8edf7;
+      --muted:#9aa3b8;
+      --accent:#7aa2ff;
+      --accent2:#6efacc;
+      --danger:#ff6b6b;
+      --edge:#242c4e;
+      --shadow:0 14px 32px rgba(0,0,0,.45);
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans JP",sans-serif;
+      background:
+        radial-gradient(1200px 600px at 80% -10%,#172147,transparent),
+        var(--bg);
+      color:var(--text);
+      display:grid;
+      place-items:center;
+      padding:10px;
+    }
+    main{
+      width:min(96vw,900px);
+      background:linear-gradient(180deg,rgba(255,255,255,.03),transparent),var(--panel);
+      border-radius:18px;
+      border:1px solid rgba(255,255,255,.06);
+      box-shadow:var(--shadow);
+      padding:16px 16px 20px;
+    }
+    header{
+      display:flex;
+      justify-content:space-between;
+      align-items:flex-start;
+      gap:12px;
+      flex-wrap:wrap;
+    }
+    h1{margin:0;font-size:18px;letter-spacing:.2px}
+    .muted{color:var(--muted);font-size:12px}
+    .row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+    .chip{
+      display:inline-grid;place-items:center;
+      padding:4px 10px;border-radius:999px;
+      border:1px solid var(--edge);
+      background:#10152f;
+      font-size:12px;color:var(--muted);
+    }
+    .chip strong{color:var(--accent2)}
+    .chip.good{border-color:rgba(110,250,204,.5);color:#b8ffea}
+    .chip.bad{border-color:rgba(255,107,107,.6);color:#ffb3b3}
+    select,button{
+      appearance:none;
+      border-radius:12px;
+      border:1px solid var(--edge);
+      background:#10152f;
+      color:var(--text);
+      padding:8px 12px;
+      font-size:14px;
+      cursor:pointer;
+    }
+    button.primary{
+      border:0;
+      background:linear-gradient(180deg,var(--accent),#5878ff);
+      color:#050818;
+      font-weight:700;
+    }
+    button:disabled{
+      opacity:.55;
+      cursor:not-allowed;
+    }
+    .surface{
+      background:var(--card);
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,.06);
+      margin-top:12px;
+      padding:10px 10px 12px;
+    }
+    canvas{
+      display:block;
+      width:100%;
+      max-width:860px;
+      height:auto;
+      border-radius:10px;
+      background:linear-gradient(180deg,#182444,#060b18);
+      border:1px solid #1f2743;
+      touch-action:manipulation; /* モバイルでタップ遅延を減らす */
+    }
+    footer{
+      margin-top:10px;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:10px;
+      flex-wrap:wrap;
+      font-size:12px;
+      color:var(--muted);
+    }
+    .kbd{
+      font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+      background:#10152f;
+      border:1px solid #27315a;
+      border-radius:6px;
+      padding:2px 6px;
+    }
+    .sr{position:absolute;left:-9999px}
+  </style>
+</head>
+<body>
+<main role="application" aria-labelledby="title">
+  <header>
+    <div>
+      <h1 id="title">Day14 — Falling Catch Game</h1>
+      <div class="muted">
+        上から落ちてくるブロックをキャッチ！ ← → キー / タップで左右移動（30秒スコアアタック）
+      </div>
+      <div class="row" style="margin-top:6px" aria-label="ステータス">
+        <span class="chip">スコア：<strong id="score">0</strong></span>
+        <span class="chip">残り：<strong id="time">30.0</strong>s</span>
+        <span class="chip good">ベスト：<strong id="best">0</strong></span>
+        <span id="feedback" class="chip" aria-live="polite"></span>
+      </div>
+    </div>
+    <div class="row" aria-label="ゲーム設定">
+      <label class="muted">
+        難易度
+        <select id="mode" aria-label="難易度モード">
+          <option value="easy">Easy（ゆっくり・少なめ）</option>
+          <option value="normal" selected>Normal</option>
+          <option value="hard">Hard（速い・多い）</option>
+        </select>
+      </label>
+      <button id="startBtn" class="primary">スタート</button>
+      <button id="restartBtn">リスタート</button>
+    </div>
+  </header>
+
+  <section class="surface">
+    <canvas id="game" width="800" height="480" aria-label="落ち物キャッチゲームエリア"></canvas>
+  </section>
+
+  <footer>
+    <div>
+      操作：<span class="kbd">←</span><span class="kbd">→</span> キー または キャンバス左右をタップで移動
+    </div>
+    <div>© toy-abz — 100日チャレンジ Day14</div>
+  </footer>
+
+  <div id="live" class="sr" aria-live="assertive"></div>
+</main>
+
+<script>
+/* ============================================================================
+  Day14 — Falling Catch Game（落ち物キャッチ）
+  学習テーマ：
+    - Canvas による 2D 描画
+    - requestAnimationFrame によるゲームループ
+    - 「重力風」の落下と時間(dt)ベースの位置更新
+    - プレイヤー矩形と落下オブジェクトの衝突判定(AABB)
+    - キーボード＆タップによる操作
+    - LocalStorage でベストスコア保存（モード別）
+    - 状態管理（idle / playing / ended）
+============================================================================ */
+
+// ------------------------------
+// DOM 取得
+// ------------------------------
+const canvas = document.getElementById('game');
+const ctx     = canvas.getContext('2d');
+
+const scoreEl   = document.getElementById('score');
+const timeEl    = document.getElementById('time');
+const bestEl    = document.getElementById('best');
+const feedback  = document.getElementById('feedback');
+const live      = document.getElementById('live');
+const startBtn  = document.getElementById('startBtn');
+const restartBtn= document.getElementById('restartBtn');
+const modeSel   = document.getElementById('mode');
+
+// ------------------------------
+// 定数（ゲーム全体設定）
+// ------------------------------
+const GAME_MS = 30_000; // 30秒
+
+// 難易度別のパラメータ（落下速度や出現間隔など）
+const MODES = {
+  easy: {
+    spawnEvery: 800,           // アイテム生成間隔（ミリ秒目安）
+    fallSpeed: [90, 130],      // vy の範囲(px/s)
+    width:     [40, 60],       // 落ち物の幅
+    height:    [22, 32],       // 高さ
+    concurrent: 3              // 同時に存在できる最大数
+  },
+  normal: {
+    spawnEvery: 600,
+    fallSpeed: [130, 190],
+    width:     [34, 52],
+    height:    [20, 30],
+    concurrent: 4
+  },
+  hard: {
+    spawnEvery: 420,
+    fallSpeed: [190, 260],
+    width:     [30, 44],
+    height:    [18, 26],
+    concurrent: 5
+  }
+};
+
+// LocalStorage用のキー
+const BEST_KEY = 'fallingcatch-best-v1';
+
+// ------------------------------
+// ユーティリティ関数
+// ------------------------------
+const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
+const randRange = (min, max) => min + Math.random() * (max - min);
+
+// LocalStorage からベストスコアを読み込み
+function loadBest(){
+  try {
+    return JSON.parse(localStorage.getItem(BEST_KEY) || '{}');
+  } catch {
+    return {};
+  }
+}
+
+// LocalStorage にベストスコアを保存
+function saveBest(data){
+  try {
+    localStorage.setItem(BEST_KEY, JSON.stringify(data));
+  } catch {
+    // プライベートモードなどで失敗する場合もあるので握りつぶし
+  }
+}
+
+// ------------------------------
+// ゲーム状態
+// ------------------------------
+let state = {
+  phase: 'idle',          // 'idle' | 'playing' | 'ended'
+  mode: 'normal',
+  timeLeft: GAME_MS,
+  score: 0,
+  best: loadBest(),       // { easy:n, normal:n, hard:n }
+  lastTime: 0,            // 直前フレームのタイムスタンプ
+  spawnTimer: 0,          // アイテム生成用のタイマー
+  player: null,           // プレイヤー矩形
+  items: []               // 落ちてくるオブジェクト配列
+};
+
+// プレイヤー初期化
+function initPlayer(){
+  const w = 80;
+  const h = 16;
+  state.player = {
+    w,
+    h,
+    x: (canvas.width - w) / 2,
+    y: canvas.height - h - 12,
+    speed: 420,      // px/s
+    moveDir: 0       // -1 左 / 0 停止 / 1 右
+  };
+}
+
+// ------------------------------
+// 描画処理
+// ------------------------------
+function drawBackground(){
+  // ほんのりグリッド風の背景
+  const grd = ctx.createLinearGradient(0,0,0,canvas.height);
+  grd.addColorStop(0,'#182746');
+  grd.addColorStop(1,'#050815');
+  ctx.fillStyle = grd;
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  // 地面ライン
+  ctx.strokeStyle = '#273253';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(0, state.player.y + state.player.h + 4);
+  ctx.lineTo(canvas.width, state.player.y + state.player.h + 4);
+  ctx.stroke();
+}
+
+function drawPlayer(){
+  const p = state.player;
+  ctx.fillStyle = '#7aa2ff';
+  ctx.roundRect(p.x, p.y, p.w, p.h, 6);
+  ctx.fill();
+
+  // 上に少し目印（取っ手のようなもの）
+  ctx.fillStyle = '#b7c8ff';
+  ctx.fillRect(p.x + p.w*0.3, p.y - 4, p.w*0.4, 4);
+}
+
+function drawItems(){
+  for(const it of state.items){
+    // 角丸矩形として描画
+    ctx.fillStyle = it.color;
+    ctx.roundRect(it.x, it.y, it.w, it.h, 6);
+    ctx.fill();
+  }
+}
+
+// メイン描画
+function draw(){
+  drawBackground();
+  drawPlayer();
+  drawItems();
+}
+
+// ------------------------------
+// ゲームループ
+// ------------------------------
+function gameLoop(now){
+  if(state.phase !== 'playing') return;
+
+  const dt = now - state.lastTime;
+  state.lastTime = now;
+
+  const modeConf = MODES[state.mode];
+
+  // プレイヤー移動（dt に応じた距離）
+  const p = state.player;
+  if(p.moveDir !== 0){
+    p.x += p.moveDir * p.speed * (dt/1000);
+    p.x = clamp(p.x, 0, canvas.width - p.w);
+  }
+
+  // アイテム生成タイマー更新
+  state.spawnTimer += dt;
+  if(
+    state.spawnTimer >= modeConf.spawnEvery &&
+    state.items.length < modeConf.concurrent
+  ){
+    spawnItem(modeConf);
+    state.spawnTimer = 0;
+  }
+
+  // アイテム落下＋プレイヤーとの衝突判定
+  const groundY = p.y + p.h + 4;
+  for(const it of state.items){
+    it.y += it.vy * (dt/1000);
+
+    // 衝突判定（簡易AABB）
+    if(
+      it.y + it.h >= p.y &&           // 縦方向で重なっている
+      it.y <= p.y + p.h &&
+      it.x + it.w >= p.x &&           // 横方向で重なっている
+      it.x <= p.x + p.w
+    ){
+      // キャッチ成功
+      it.caught = true;
+      state.score += 1;
+      feedback.textContent = 'キャッチ！ +1';
+      feedback.classList.remove('bad');
+      feedback.classList.add('good');
+    }
+
+    // 地面に到達（ミス判定は今回はスコア変化なし）
+    if(it.y + it.h >= groundY){
+      it.dead = true;
+    }
+  }
+
+  // 生きているアイテムだけ残す
+  state.items = state.items.filter(it => !it.caught && !it.dead);
+
+  // 残り時間の更新
+  state.timeLeft = Math.max(0, state.timeLeft - dt);
+  timeEl.textContent = (state.timeLeft / 1000).toFixed(1);
+
+  if(state.timeLeft <= 0){
+    endGame();
+    return;
+  }
+
+  // HUD の更新と描画
+  scoreEl.textContent = state.score;
+  draw();
+
+  requestAnimationFrame(gameLoop);
+}
+
+// ------------------------------
+// アイテム生成
+// ------------------------------
+function spawnItem(conf){
+  const w = randRange(conf.width[0], conf.width[1]);
+  const h = randRange(conf.height[0], conf.height[1]);
+  const x = randRange(0, canvas.width - w);
+  const y = -h - 10; // 画面上から落ちてくる
+
+  const vy = randRange(conf.fallSpeed[0], conf.fallSpeed[1]);
+
+  const colors = ['#ff6b6b','#ffa94d','#ffd43b','#69db7c','#4dabf7','#b197fc'];
+  const color = colors[Math.floor(Math.random()*colors.length)];
+
+  state.items.push({
+    x, y, w, h, vy, color,
+    caught:false,
+    dead:false
+  });
+}
+
+// ------------------------------
+// ゲーム開始・終了・リスタート
+// ------------------------------
+function startGame(){
+  // idle または ended のときのみ開始
+  if(state.phase === 'playing') return;
+
+  state.phase = 'playing';
+  state.mode = modeSel.value;
+  state.timeLeft = GAME_MS;
+  state.score = 0;
+  state.items = [];
+  state.spawnTimer = 0;
+  feedback.textContent = 'スタート！';
+  feedback.className = 'chip';
+
+  initPlayer();
+
+  // 初回のベスト表示
+  bestEl.textContent = state.best[state.mode] || 0;
+
+  // HUD 初期化
+  scoreEl.textContent = '0';
+  timeEl.textContent  = (GAME_MS/1000).toFixed(1);
+
+  // タイムスタンプ記録してループスタート
+  state.lastTime = performance.now();
+  requestAnimationFrame(gameLoop);
+}
+
+function endGame(){
+  state.phase = 'ended';
+
+  // ベストスコア更新
+  const prev = state.best[state.mode] || 0;
+  if(state.score > prev){
+    state.best[state.mode] = state.score;
+    saveBest(state.best);
+    bestEl.textContent = state.best[state.mode] || 0;
+    feedback.textContent = `終了！ベスト更新：${state.score} 点`;
+  }else{
+    feedback.textContent = `終了！スコア：${state.score} 点`;
+  }
+  feedback.classList.remove('good','bad');
+  feedback.classList.add('chip');
+
+  live.textContent = `ゲーム終了。スコア ${state.score} 点`;
+}
+
+function restartGame(){
+  // 状態を初期化してすぐ startGame
+  state.phase = 'idle';
+  startGame();
+}
+
+// ------------------------------
+// 入力処理（キーボード & ポインタ）
+// ------------------------------
+
+// キーボード：左右キーで移動
+window.addEventListener('keydown', (e)=>{
+  if(!state.player) return;
+  if(e.key === 'ArrowLeft'){
+    state.player.moveDir = -1;
+  }else if(e.key === 'ArrowRight'){
+    state.player.moveDir = 1;
+  }else if(e.key === ' '){
+    // Space でリスタート（お好み）
+    e.preventDefault();
+    if(state.phase !== 'playing') restartGame();
+  }
+});
+
+window.addEventListener('keyup', (e)=>{
+  if(!state.player) return;
+  if(e.key === 'ArrowLeft' && state.player.moveDir === -1){
+    state.player.moveDir = 0;
+  }else if(e.key === 'ArrowRight' && state.player.moveDir === 1){
+    state.player.moveDir = 0;
+  }
+});
+
+// ポインタ：Canvas 上のタップ位置にプレイヤー中心を合わせる
+canvas.addEventListener('pointerdown', (e)=>{
+  if(!state.player) return;
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const x = (e.clientX - rect.left) * scaleX;
+  state.player.x = clamp(x - state.player.w/2, 0, canvas.width - state.player.w);
+});
+
+// ------------------------------
+// UI イベント
+// ------------------------------
+startBtn.addEventListener('click', startGame);
+restartBtn.addEventListener('click', restartGame);
+
+modeSel.addEventListener('change', ()=>{
+  // モード変更時はベストだけ反映（ゲーム中は処理を変えない）
+  bestEl.textContent = state.best[modeSel.value] || 0;
+});
+
+// ------------------------------
+// 初期化
+// ------------------------------
+(function init(){
+  initPlayer();
+  bestEl.textContent = state.best[state.mode] || 0;
+  draw(); // 初期表示
+})();
+</script>
+</body>
+</html>
